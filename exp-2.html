@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Transformer Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBe8Jo53mGiBn1-jQ5n7BOZhMz61w6Qoi0",
+      authDomain: "transformer-logger.firebaseapp.com",
+      projectId: "transformer-logger",
+      storageBucket: "transformer-logger.appspot.com",
+      messagingSenderId: "272335394424",
+      appId: "1:272335394424:web:e4932c90ef81587e70bf8d",
+      measurementId: "G-LZ08CQHSZ9"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    window.db = db;
+  </script>
+</head>
+<body class="bg-gray-100 text-gray-900">
+  <div class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white shadow-md p-6 hidden md:block">
+      <h2 class="text-xl font-bold mb-6">Transformer Logger</h2>
+      <nav class="space-y-3">
+        <button onclick="showTab('logTab')" class="w-full text-left px-4 py-2 rounded hover:bg-gray-200">Log Data</button>
+        <button onclick="showTab('viewTab')" class="w-full text-left px-4 py-2 rounded hover:bg-gray-200">View/Delete</button>
+        <button onclick="showTab('trendTab')" class="w-full text-left px-4 py-2 rounded hover:bg-gray-200">Monthly Trend</button>
+        <button onclick="showTab('exportTab')" class="w-full text-left px-4 py-2 rounded hover:bg-gray-200">Export CSV</button>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 overflow-auto p-6">
+      <!-- Log Tab -->
+      <section id="logTab">
+        <h1 class="text-2xl font-semibold mb-4">📊 Log Transformer Data</h1>
+        <form id="dataForm" class="space-y-6 bg-white p-6 rounded shadow max-w-4xl">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label>Date <input type="date" id="date" required class="mt-1 w-full border rounded p-2"/></label></div>
+            <div>
+              <label>Shift
+                <select id="shift" required class="mt-1 w-full border rounded p-2">
+                  <option value="" disabled selected>Select</option>
+                  <option>A</option><option>B</option><option>C</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="overflow-auto max-h-96">
+            <table class="w-full border text-sm mt-6">
+              <thead><tr class="bg-gray-200"><th class="p-2 border">Transformer</th><th class="p-2 border">OTI (°C)</th><th class="p-2 border">WTI (°C)</th><th class="p-2 border">Tap</th><th class="p-2 border">Oil Level</th></tr></thead>
+              <tbody id="transformerTable"></tbody>
+            </table>
+          </div>
+          <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded hover:bg-blue-700">💾 Save Data</button>
+        </form>
+      </section>
+
+      <!-- View/Delete Tab -->
+      <section id="viewTab" class="hidden max-w-4xl">
+        <h1 class="text-2xl font-semibold mb-4">🔍 View/Delete Data</h1>
+        <div class="flex gap-4 mb-4 items-end">
+          <label>Date <input type="date" id="viewDate" class="mt-1 border rounded p-2"/></label>
+          <label>Shift
+            <select id="viewShift" class="mt-1 border rounded p-2">
+              <option value="" disabled selected>Select</option>
+              <option>A</option><option>B</option><option>C</option>
+            </select>
+          </label>
+          <button onclick="viewData()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">View</button>
+        </div>
+        <ul id="output" class="space-y-2"></ul>
+      </section>
+
+      <!-- Monthly Trend -->
+      <section id="trendTab" class="hidden max-w-4xl">
+        <h1 class="text-2xl font-semibold mb-4">📈 Monthly Trend</h1>
+        <div class="flex gap-4 mb-4 items-end">
+          <label>Month <input type="month" id="trendMonth" class="mt-1 border rounded p-2"/></label>
+          <label>Transformer
+            <select id="trendTransformer" class="mt-1 border rounded p-2"><option value="" disabled selected>Select</option></select>
+          </label>
+          <button onclick="plotTrend()" class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600">Plot</button>
+        </div>
+        <div class="bg-white p-6 rounded shadow">
+          <canvas id="trendChart" style="min-height:300px;"></canvas>
+        </div>
+      </section>
+
+      <!-- Export CSV -->
+      <section id="exportTab" class="hidden max-w-4xl">
+        <h1 class="text-2xl font-semibold mb-4">📥 Export CSV</h1>
+        <form id="exportForm" class="flex gap-4 items-end">
+          <label>From Date <input type="date" id="exportFrom" required class="mt-1 border rounded p-2"/></label>
+          <label>To Date <input type="date" id="exportTo" required class="mt-1 border rounded p-2"/></label>
+          <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Export</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const transformers = ['GT‑1','GT‑2','UAT‑1','UAT‑2','SAT‑1','SAT‑2'];
+    const tBody = document.getElementById('transformerTable');
+    const trendSelect = document.getElementById('trendTransformer');
+
+    transformers.forEach(name => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="border p-2 font-medium">${name}</td>
+        <td class="border p-2"><input type="number" name="oti_${name}" step="0.1" required class="w-full border p-1"></td>
+        <td class="border p-2"><input type="number" name="wti_${name}" step="0.1" required class="w-full border p-1"></td>
+        <td class="border p-2"><input type="text" name="tap_${name}" required class="w-full border p-1"></td>
+        <td class="border p-2"><input type="text" name="oil_${name}" required class="w-full border p-1"></td>`;
+      tBody.appendChild(tr);
+
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      trendSelect.appendChild(opt);
+    });
+
+    function showTab(id) {
+      document.querySelectorAll('main section').forEach(s => s.classList.add('hidden'));
+      document.getElementById(id).classList.remove('hidden');
+    }
+    showTab('logTab');
+
+    // Save
+    document.getElementById('dataForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const date = document.getElementById('date').value;
+      const shift = document.getElementById('shift').value;
+      if (!date || !shift) return alert('Select date & shift!');
+
+      const data = transformers.map(name => ({
+        transformer: name,
+        oti: document.querySelector(`[name="oti_${name}"]`).value,
+        wti: document.querySelector(`[name="wti_${name}"]`).value,
+        tap: document.querySelector(`[name="tap_${name}"]`).value,
+        oilLevel: document.querySelector(`[name="oil_${name}"]`).value
+      }));
+
+      try {
+        await setDoc(doc(window.db, 'transformerLogs', `${date}_${shift}`), { entries: data });
+        alert('Saved ✅');
+        e.target.reset();
+      } catch (err) {
+        console.error(err);
+        alert('Save error ❌');
+      }
+    });
+
+    // View/Delete
+    async function viewData() {
+      const date = document.getElementById('viewDate').value;
+      const shift = document.getElementById('viewShift').value;
+      const out = document.getElementById('output');
+      out.innerHTML = '';
+      if (!date || !shift) return alert('Select both.');
+
+      const ref = doc(window.db, 'transformerLogs', `${date}_${shift}`);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        out.innerHTML = '<li class="text-gray-500">No data found.</li>';
+        return;
+      }
+      const data = snap.data().entries;
+      data.forEach((e, i) => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between bg-white p-4 rounded shadow';
+        li.innerHTML = `<div><strong>${e.transformer}</strong> – OTI: ${e.oti}, WTI: ${e.wti}, Tap: ${e.tap}, Oil: ${e.oilLevel}</div><button data-idx="${i}" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Delete</button>`;
+        out.appendChild(li);
+      });
+
+      out.onclick = async ev => {
+        if (ev.target.tagName !== 'BUTTON') return;
+        const idx = +ev.target.dataset.idx;
+        if (!confirm('Delete entry?')) return;
+
+        data.splice(idx, 1);
+        if (data.length) await setDoc(ref, { entries: data });
+        else await deleteDoc(ref);
+        viewData();
+      };
+    }
+
+    // Trend plot
+    async function plotTrend() {
+      const month = document.getElementById('trendMonth').value;
+      const transformer = document.getElementById('trendTransformer').value;
+      if (!month || !transformer) return alert('Select both.');
+
+      const [y, m] = month.split('-');
+      const start = new Date(`${y}-${m}-01`);
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + 1);
+
+      const snap = await getDocs(collection(window.db, 'transformerLogs'));
+      const trend = [];
+      snap.forEach(docSnap => {
+        const [dStr, shift] = docSnap.id.split('_');
+        const d = new Date(dStr);
+        if (d >= start && d < end) {
+          docSnap.data().entries.forEach(e => {
+            if (e.transformer === transformer) {
+              trend.push({ label: `${dStr} (${shift})`, oti: +e.oti, wti: +e.wti });
+            }
+          });
+        }
+      });
+
+      if (!trend.length) return alert('No data for this month & transformer.');
+
+      trend.sort((a, b) => a.label.localeCompare(b.label));
+      const labels = trend.map(t => t.label);
+      const oti = trend.map(t => t.oti);
+      const wti = trend.map(t => t.wti);
+
+      if (window.myChart) window.myChart.destroy();
+      const ctx = document.getElementById('trendChart').getContext('2d');
+      window.myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'OTI (°C)', data: oti, borderColor: 'rgba(75,192,192,1)', backgroundColor: 'rgba(75,192,192,0.2)', tension: 0.3 },
+            { label: 'WTI (°C)', data: wti, borderColor: 'rgba(255,99,132,1)', backgroundColor: 'rgba(255,99,132,0.2)', tension: 0.3 }
+          ]
+        },
+        options: { responsive: true, scales: { x: { title: { display: true, text: 'Date (Shift)' }}, y: { title: { display: true, text: 'Temperature (°C)' }}}}
+      });
+    }
+
+    // CSV Export
+    document.getElementById('exportForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const from = document.getElementById('exportFrom').value;
+      const to = document.getElementById('exportTo').value;
+      if (!from || !to) return alert('Select both.');
+      if (from > to) return alert('"From" cannot be after "To".');
+
+      const start = new Date(from);
+      const end = new Date(new Date(to).setDate(new Date(to).getDate() + 1));
+      const snap = await getDocs(collection(window.db, 'transformerLogs'));
+      const rows = [['Date','Shift','Transformer','OTI','WTI','Tap','Oil Level']];
+
+      snap.forEach(docSnap => {
+        const [dStr, shift] = docSnap.id.split('_');
+        const d = new Date(dStr);
+        if (d >= start && d < end) {
+          docSnap.data().entries.forEach(e => {
+            rows.push([dStr, shift, e.transformer, e.oti, e.wti, e.tap, e.oilLevel]);
+          });
+        }
+      });
+
+      if (rows.length === 1) return alert('No data found in range.');
+
+      const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `transformer_data_${from}_to_${to}.csv`;
+      link.click();
+    });
+  </script>
+</body>
+</html>
